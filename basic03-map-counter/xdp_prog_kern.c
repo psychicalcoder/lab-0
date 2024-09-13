@@ -22,13 +22,43 @@ struct {
 #define lock_xadd(ptr, val)	((void) __sync_fetch_and_add(ptr, val))
 #endif
 
+inline int record_packet(struct xdp_md *ctx, enum xdp_action action) {
+  void *data_end = (void *)(long)ctx->data_end;
+  void *data = (void *)(long)ctx->data;
+  __u64 bytes = data_end - data;
+  __u32 key = action;
+  struct datarec *rec = bpf_map_lookup_elem(&xdp_stats_map, &key);
+  if (!rec) return XDP_ABORTED;
+
+  lock_xadd(&rec->rx_packets, 1);
+  lock_xadd(&rec->rx_bytes, bytes);
+  
+  return action;
+}
+
+SEC("xdp")
+int xdp_aborted_func(struct xdp_md *ctx) { return record_packet(ctx, XDP_ABORTED); }
+
+SEC("xdp")
+int xdp_drop_func(struct xdp_md *ctx) { return record_packet(ctx, XDP_DROP); }
+
+SEC("xdp")
+int xdp_pass_func(struct xdp_md *ctx) { return record_packet(ctx, XDP_PASS); }
+
+SEC("xdp")
+int xdp_tx_func(struct xdp_md *ctx) { return record_packet(ctx, XDP_TX); }
+
+SEC("xdp")
+int xdp_redirect_func(struct xdp_md *ctx) { return record_packet(ctx, XDP_REDIRECT); }
+
 SEC("xdp")
 int  xdp_stats1_func(struct xdp_md *ctx)
 {
-	// void *data_end = (void *)(long)ctx->data_end;
-	// void *data     = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
+	void *data     = (void *)(long)ctx->data;
 	struct datarec *rec;
 	__u32 key = XDP_PASS; /* XDP_PASS = 2 */
+    __u64 bytes = data_end - data;
 
 	/* Lookup in kernel BPF-side return pointer to actual data record */
 	rec = bpf_map_lookup_elem(&xdp_stats_map, &key);
@@ -43,12 +73,15 @@ int  xdp_stats1_func(struct xdp_md *ctx)
 	 * use an atomic operation.
 	 */
 	lock_xadd(&rec->rx_packets, 1);
-        /* Assignment#1: Add byte counters
-         * - Hint look at struct xdp_md *ctx (copied below)
-         *
-         * Assignment#3: Avoid the atomic operation
-         * - Hint there is a map type named BPF_MAP_TYPE_PERCPU_ARRAY
-         */
+    lock_xadd(&rec->rx_bytes, bytes);
+    
+    
+    /* Assignment#1: Add byte counters
+     * - Hint look at struct xdp_md *ctx (copied below)
+     *
+     * Assignment#3: Avoid the atomic operation
+     * - Hint there is a map type named BPF_MAP_TYPE_PERCPU_ARRAY
+     */
 
 	return XDP_PASS;
 }
